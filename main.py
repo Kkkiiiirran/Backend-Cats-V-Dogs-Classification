@@ -1,40 +1,50 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
-from tensorflow import keras
-from keras import Sequential
 from keras.models import load_model
 import numpy as np
 from PIL import Image
 import io
-from fastapi.middleware.cors import CORSMiddleware
+import os
+import requests
+
+MODEL_URL = "https://huggingface.co/spaces/Tauqueer-Alam/Dog-Vs-Cat-Classifier/resolve/main/model.h5"
+MODEL_PATH = "model.h5"
 
 app = FastAPI()
 
-@app.get("/")
-def read_root():
-    return {"message": "Successful"}
-
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Load the saved model once during initialization
-model = load_model('./model.h5')
+@app.get("/")
+def read_root():
+    return {"message": "API is live"}
+
+def download_model():
+    """Download model from Hugging Face if not present locally."""
+    if not os.path.exists(MODEL_PATH):
+        print("Downloading model.h5 from Hugging Face...")
+        response = requests.get(MODEL_URL)
+        with open(MODEL_PATH, "wb") as f:
+            f.write(response.content)
+        print("Model downloaded.")
+
+# Download model if needed and load it
+download_model()
+model = load_model(MODEL_PATH)
 
 def predict_image(file: bytes):
-    # Load and preprocess the image
-    image = Image.open(io.BytesIO(file))
+    """Preprocess and predict"""
+    image = Image.open(io.BytesIO(file)).convert("RGB")
     image = image.resize((256, 256))
-    img_array = np.array(image)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = img_array / 255.0  # Normalize the image to match training data
-
-    # Predict using the model
+    img_array = np.expand_dims(np.array(image) / 255.0, axis=0)
     prediction = model.predict(img_array)
     return prediction
 
@@ -45,7 +55,7 @@ async def predict(file: UploadFile = File(...)):
         prediction = predict_image(file_bytes)
         class_name = "dog" if prediction[0][0] > 0.5 else "cat"
         class_id = 1 if prediction[0][0] > 0.5 else 0
-        return JSONResponse(content={"class_name": class_name, "class": class_id})
+        return {"class_name": class_name, "class": class_id}
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
